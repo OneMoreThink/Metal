@@ -7,16 +7,23 @@
 
 import MetalKit
 
-// 단순한 입자 구조체
-struct Particle {
-    var isEmpty: Bool      // 이 셀이 비어있는지 여부
-    var hasBeenUpdated: Bool    // 이 프레임에서 이미 업데이트 되었는지
-}
-
 // RGBA 색상 구조체
 struct Color {
     var r: UInt8
     var g: UInt8
     var b: UInt8
     var a: UInt8
+}
+
+// GPU와 공유할 입자 구조체
+struct Particle {
+    var isEmpty: UInt32    // GPU에서 bool 대신 UInt32 사용 (메모리 정렬)
+    var type: UInt32       // 입자 타입
+}
+
+// GPU에 전달할 시뮬레이션 파라미터
+struct SimulationParams {
+    var width: UInt32
+    var height: UInt32
+    var frameCount: UInt32
 }

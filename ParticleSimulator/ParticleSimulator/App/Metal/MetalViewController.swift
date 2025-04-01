@@ -13,7 +13,7 @@ class MetalViewController: UIViewController {
     // Metal 관련 객체
     private var device: MTLDevice!
     private var commandQueue: MTLCommandQueue!
-    private var pipelineState: MTLRenderPipelineState!
+    private var renderPipelineState: MTLRenderPipelineState!
     private var vertexBuffer: MTLBuffer!
     private var texture: MTLTexture!
     
@@ -54,6 +54,7 @@ class MetalViewController: UIViewController {
         simulatorView.delegate = self
         view.addSubview(simulatorView)
     }
+    
     // Metal device 설정
     private func setupMetal() {
         // Metal 디바이스 초기화
@@ -89,6 +90,7 @@ class MetalViewController: UIViewController {
         
         setupRenderPipeline()
     }
+    
     // 렌더 파이프라인 설정
     private func setupRenderPipeline() {
         // 셰이더 라이브러리 생성
@@ -106,18 +108,19 @@ class MetalViewController: UIViewController {
         
         // 렌더 파이프라인 상태 생성
         do {
-            pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            renderPipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
         } catch {
-            print("Failed to create pipeline state: \(error)")
+            print("파이프라인 상태 생성 실패: \(error)")
         }
     }
+    
     // 시뮬레이터(물리 동작 계산) 설정
     private func setupSimulator() {
-        // 입자 시뮬레이터 초기화
-        simulator = ParticleSimulator(width: gridWidth, height: gridHeight)
+        // GPU 기반 입자 시뮬레이터 초기화
+        simulator = ParticleSimulator(width: gridWidth, height: gridHeight, device: device)
     }
     
-// MARK: - 입자 생성 관련 메서드 ( View -> Controller -> Simulator ) 
+// MARK: - 입자 생성 관련 메서드 ( View -> Controller -> Simulator )
     // 터치 위치에 입자 생성
     private func createParticlesAtPosition(position: CGPoint) {
         // 뷰 좌표를 그리드 좌표로 변환
@@ -147,14 +150,19 @@ class MetalViewController: UIViewController {
     
     // 텍스처 업데이트
     private func updateTextureFromColorBuffer() {
+        // 색상 버퍼의 포인터 가져오기
+        let colorBufferPtr = simulator.getColorBufferPointer()
+        
+        // 텍스처 리전 업데이트
         texture.replace(
             region: MTLRegionMake2D(0, 0, gridWidth, gridHeight),
             mipmapLevel: 0,
-            withBytes: simulator.colorBuffer,
+            withBytes: colorBufferPtr,
             bytesPerRow: gridWidth * MemoryLayout<Color>.stride
         )
     }
 }
+
 // MARK: - MTKViewDelegate
 extension MetalViewController: MTKViewDelegate {
     
@@ -163,7 +171,7 @@ extension MetalViewController: MTKViewDelegate {
     }
     
     func draw(in view: MTKView) {
-        // 시뮬레이션 업데이트
+        // GPU에서 시뮬레이션 업데이트
         simulator.update()
         
         // 텍스처 업데이트
@@ -182,7 +190,7 @@ extension MetalViewController: MTKViewDelegate {
         }
         
         // 렌더 파이프라인 상태 및 리소스 설정
-        renderEncoder.setRenderPipelineState(pipelineState)
+        renderEncoder.setRenderPipelineState(renderPipelineState)
         renderEncoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
         renderEncoder.setFragmentTexture(texture, index: 0)
         
