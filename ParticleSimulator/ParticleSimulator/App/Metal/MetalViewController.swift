@@ -22,18 +22,17 @@ class MetalViewController: UIViewController, MTKViewDelegate {
     private let gridWidth = 100
     private let gridHeight = 100
     
+    // 시뮬레이션 객체
+    private var simulator: ParticleSimulator!
+    
     // 터치 입력 관련 변수
     private var lastTouchPosition: CGPoint?
     private var touchActive: Bool = false
     
-    // 버퍼
-    private var particles = [Particle]()
-    private var colorBuffer = [Color]()
-    
     override func viewDidLoad() {
         super.viewDidLoad()
         setupMetal()
-        setupBuffers()
+        setupSimulator()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -109,15 +108,9 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         }
     }
     
-    private func setupBuffers() {
-        // 입자 데이터 초기화
-        particles = [Particle](repeating: Particle(
-            isEmpty: true,
-            hasBeenUpdated: false
-        ), count: gridWidth * gridHeight)
-        
-        // 색상 버퍼 초기화 (처음에는 모두 투명)
-        colorBuffer = [Color](repeating: Color(r: 0, g: 0, b: 0, a: 0), count: gridWidth * gridHeight)
+    private func setupSimulator() {
+        // 입자 시뮬레이터 초기화
+        simulator = ParticleSimulator(width: gridWidth, height: gridHeight)
     }
     
     // 연속적인 터치 이동 처리
@@ -162,108 +155,20 @@ class MetalViewController: UIViewController, MTKViewDelegate {
             return
         }
         
-        // 더 자연스러운 느낌을 위해 터치 포인트 주변의 작은 반경에 입자 생성
-        let radius = 2
-        for offsetY in -radius...radius {
-            for offsetX in -radius...radius {
-                let x = gridX + offsetX
-                let y = gridY + offsetY
-                
-                // 경계 확인
-                if x >= 0 && x < gridWidth && y >= 0 && y < gridHeight {
-                    let index = y * gridWidth + x
-                    
-                    // 빈 셀에만 모래 배치
-                    if particles[index].isEmpty {
-                        // 입자 생성
-                        particles[index] = Particle(isEmpty: false, hasBeenUpdated: false)
-                        
-                        // 모래 색상 설정 (자연스러운 모습을 위한 약간의 변화)
-                        let variation = UInt8.random(in: 0...30)
-                        colorBuffer[index] = Color(
-                            r: UInt8(min(220 + Int(variation) - 15, 255)),
-                            g: UInt8(min(180 + Int(variation) - 15, 255)),
-                            b: UInt8(min(80 + Int(variation) - 15, 255)),
-                            a: 255
-                        )
-                    }
-                }
-            }
-        }
+        // 시뮬레이터에 입자 생성 요청
+        simulator.createParticlesAt(x: gridX, y: gridY)
     }
     
-    // [추가] 빠르게 드래그할 때 연속적인 입자 스트림을 만들기 위한 도우미 메소드
+    // 빠르게 드래그할 때 연속적인 입자 스트림을 만들기 위한 도우미 메소드
     private func interpolateParticles(from startPoint: CGPoint, to endPoint: CGPoint) {
-        let distance = hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y)
-        let steps = max(Int(distance / 2.0), 1) // 약 2픽셀마다 하나의 입자
+        // 뷰 좌표를 그리드 좌표로 변환
+        let startGridX = Int((startPoint.x / metalView.bounds.width) * CGFloat(gridWidth))
+        let startGridY = Int((startPoint.y / metalView.bounds.height) * CGFloat(gridHeight))
+        let endGridX = Int((endPoint.x / metalView.bounds.width) * CGFloat(gridWidth))
+        let endGridY = Int((endPoint.y / metalView.bounds.height) * CGFloat(gridHeight))
         
-        for step in 0..<steps {
-            let progress = CGFloat(step) / CGFloat(steps)
-            let interpolatedPoint = CGPoint(
-                x: startPoint.x + (endPoint.x - startPoint.x) * progress,
-                y: startPoint.y + (endPoint.y - startPoint.y) * progress
-            )
-            createParticlesAtPosition(position: interpolatedPoint)
-        }
-    }
-
-    
-    // 모래 입자 업데이트 (물리 시뮬레이션)
-    private func updateSandSimulation() {
-        // 아래에서 위로 순회 (중력 방향을 고려)
-        for y in (0..<gridHeight).reversed() {
-            for x in 0..<gridWidth {
-                let index = y * gridWidth + x
-                
-                // 빈 공간이거나 이미 업데이트된 입자는 건너뛰기
-                if particles[index].isEmpty || particles[index].hasBeenUpdated {
-                    continue
-                }
-                
-                // 모래 입자 업데이트 로직
-                let belowY = y + 1
-                
-                // 화면 바닥에 도달했는지 확인
-                if belowY >= gridHeight {
-                    particles[index].hasBeenUpdated = true
-                    continue
-                }
-                
-                // 1. 바로 아래가 비어있으면 아래로 떨어짐
-                if particles[belowY * gridWidth + x].isEmpty {
-                    moveParticle(fromIndex: index, toIndex: belowY * gridWidth + x)
-                }
-                // 2. 왼쪽 아래가 비어있으면 왼쪽 아래로 이동
-                else if x > 0 && particles[belowY * gridWidth + (x-1)].isEmpty {
-                    moveParticle(fromIndex: index, toIndex: belowY * gridWidth + (x-1))
-                }
-                // 3. 오른쪽 아래가 비어있으면 오른쪽 아래로 이동
-                else if x < gridWidth-1 && particles[belowY * gridWidth + (x+1)].isEmpty {
-                    moveParticle(fromIndex: index, toIndex: belowY * gridWidth + (x+1))
-                }
-                // 4. 이동할 수 없으면 해당 위치에 정지
-                else {
-                    particles[index].hasBeenUpdated = true
-                }
-            }
-        }
-        
-        // 다음 프레임을 위해 업데이트 플래그 초기화
-        for i in 0..<particles.count {
-            particles[i].hasBeenUpdated = false
-        }
-    }
-    
-    // 입자 이동 헬퍼 함수
-    private func moveParticle(fromIndex: Int, toIndex: Int) {
-        // 1. 물리 데이터 이동
-        particles[toIndex] = particles[fromIndex]
-        particles[toIndex].hasBeenUpdated = true
-        particles[fromIndex] = Particle(isEmpty: true, hasBeenUpdated: false)
-        
-        // 2. 색상 데이터 이동
-        colorBuffer[toIndex] = colorBuffer[fromIndex]
-        colorBuffer[fromIndex] = Color(r: 0, g: 0, b: 0, a: 0)
+        // 시뮬레이터에서 두 지점 사이에 입자 생성
+        simulator.createParticlesBetween(startX: startGridX, startY: startGridY, endX: endGridX, endY: endGridY)
     }
     
     // 텍스처 업데이트
@@ -271,7 +176,7 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         texture.replace(
             region: MTLRegionMake2D(0, 0, gridWidth, gridHeight),
             mipmapLevel: 0,
-            withBytes: colorBuffer,
+            withBytes: simulator.colorBuffer,
             bytesPerRow: gridWidth * MemoryLayout<Color>.stride
         )
     }
@@ -283,9 +188,8 @@ class MetalViewController: UIViewController, MTKViewDelegate {
     }
     
     func draw(in view: MTKView) {
-
         // 시뮬레이션 업데이트
-        updateSandSimulation()
+        simulator.update()
         
         // 텍스처 업데이트
         updateTextureFromColorBuffer()
