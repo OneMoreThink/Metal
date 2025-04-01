@@ -8,12 +8,11 @@
 import UIKit
 import MetalKit
 
-class MetalViewController: UIViewController, MTKViewDelegate {
+class MetalViewController: UIViewController {
     
     // Metal 관련 객체
     private var device: MTLDevice!
     private var commandQueue: MTLCommandQueue!
-    private var metalView: MTKView!
     private var pipelineState: MTLRenderPipelineState!
     private var vertexBuffer: MTLBuffer!
     private var texture: MTLTexture!
@@ -29,8 +28,13 @@ class MetalViewController: UIViewController, MTKViewDelegate {
     private var lastTouchPosition: CGPoint?
     private var touchActive: Bool = false
     
+    // 분리된 메인 뷰
+    private var simulatorView: ParticleSimulatorView!
+    
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        setupView()
         setupMetal()
         setupSimulator()
     }
@@ -39,27 +43,28 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         super.viewDidAppear(animated)
         
         // 터치 입력을 위한 제스처 인식기 추가
-        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
-        metalView.addGestureRecognizer(panGesture)
-        
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapGesture(_:)))
-        metalView.addGestureRecognizer(tapGesture)
+        simulatorView.setupGestureRecognizers()
     }
     
+// MARK: - 시뮬레이터 초기 설정 메서드
+    // 메인 시뮬레이터 뷰 생성 및 설정
+    private func setupView() {
+        simulatorView = ParticleSimulatorView(frame: view.bounds)
+        simulatorView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        simulatorView.delegate = self
+        view.addSubview(simulatorView)
+    }
+    // Metal device 설정
     private func setupMetal() {
         // Metal 디바이스 초기화
         device = MTLCreateSystemDefaultDevice()
         
-        // Metal 뷰 설정
-        metalView = MTKView(frame: view.bounds, device: device)
-        metalView.delegate = self
-        metalView.framebufferOnly = false
-        metalView.clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
-        metalView.colorPixelFormat = .bgra8Unorm
-        view.addSubview(metalView)
-        
         // 커맨드 큐 생성
         commandQueue = device.makeCommandQueue()
+        
+        // MTKView 참조 가져오기
+        let metalView = simulatorView.metalView
+        metalView?.delegate = self
         
         // 전체 화면 쿼드용 정점 데이터
         let vertexData: [Float] = [
@@ -82,10 +87,9 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         textureDescriptor.usage = [.shaderRead, .shaderWrite]
         texture = device.makeTexture(descriptor: textureDescriptor)!
         
-        // 렌더 파이프라인 설정
         setupRenderPipeline()
     }
-    
+    // 렌더 파이프라인 설정
     private func setupRenderPipeline() {
         // 셰이더 라이브러리 생성
         let library = device.makeDefaultLibrary()
@@ -98,7 +102,7 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
-        pipelineDescriptor.colorAttachments[0].pixelFormat = metalView.colorPixelFormat
+        pipelineDescriptor.colorAttachments[0].pixelFormat = simulatorView.metalView.colorPixelFormat
         
         // 렌더 파이프라인 상태 생성
         do {
@@ -107,48 +111,18 @@ class MetalViewController: UIViewController, MTKViewDelegate {
             print("Failed to create pipeline state: \(error)")
         }
     }
-    
+    // 시뮬레이터(물리 동작 계산) 설정
     private func setupSimulator() {
         // 입자 시뮬레이터 초기화
         simulator = ParticleSimulator(width: gridWidth, height: gridHeight)
     }
     
-    // 연속적인 터치 이동 처리
-    @objc private func handlePanGesture(_ gestureRecognizer: UIPanGestureRecognizer) {
-        switch gestureRecognizer.state {
-        case .began:
-            touchActive = true
-            lastTouchPosition = gestureRecognizer.location(in: metalView)
-            createParticlesAtPosition(position: lastTouchPosition!)
-        case .changed:
-            let currentPosition = gestureRecognizer.location(in: metalView)
-            createParticlesAtPosition(position: currentPosition)
-            
-            // 빠른 움직임 중에도 부드러운 선을 위해 마지막 위치와 현재 위치 사이를 보간
-            if let lastPosition = lastTouchPosition {
-                interpolateParticles(from: lastPosition, to: currentPosition)
-            }
-            
-            lastTouchPosition = currentPosition
-        case .ended, .cancelled:
-            touchActive = false
-            lastTouchPosition = nil
-        default:
-            break
-        }
-    }
-    
-    // [추가] 단일 탭 처리
-    @objc private func handleTapGesture(_ gestureRecognizer: UITapGestureRecognizer) {
-        let tapPosition = gestureRecognizer.location(in: metalView)
-        createParticlesAtPosition(position: tapPosition)
-    }
-    
-    // [추가] 터치 위치에 입자 생성
+// MARK: - 입자 생성 관련 메서드 ( View -> Controller -> Simulator ) 
+    // 터치 위치에 입자 생성
     private func createParticlesAtPosition(position: CGPoint) {
         // 뷰 좌표를 그리드 좌표로 변환
-        let gridX = Int((position.x / metalView.bounds.width) * CGFloat(gridWidth))
-        let gridY = Int((position.y / metalView.bounds.height) * CGFloat(gridHeight))
+        let gridX = Int((position.x / simulatorView.metalView.bounds.width) * CGFloat(gridWidth))
+        let gridY = Int((position.y / simulatorView.metalView.bounds.height) * CGFloat(gridHeight))
         
         // 경계 내에 있는지 확인
         guard gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight else {
@@ -162,10 +136,10 @@ class MetalViewController: UIViewController, MTKViewDelegate {
     // 빠르게 드래그할 때 연속적인 입자 스트림을 만들기 위한 도우미 메소드
     private func interpolateParticles(from startPoint: CGPoint, to endPoint: CGPoint) {
         // 뷰 좌표를 그리드 좌표로 변환
-        let startGridX = Int((startPoint.x / metalView.bounds.width) * CGFloat(gridWidth))
-        let startGridY = Int((startPoint.y / metalView.bounds.height) * CGFloat(gridHeight))
-        let endGridX = Int((endPoint.x / metalView.bounds.width) * CGFloat(gridWidth))
-        let endGridY = Int((endPoint.y / metalView.bounds.height) * CGFloat(gridHeight))
+        let startGridX = Int((startPoint.x / simulatorView.metalView.bounds.width) * CGFloat(gridWidth))
+        let startGridY = Int((startPoint.y / simulatorView.metalView.bounds.height) * CGFloat(gridHeight))
+        let endGridX = Int((endPoint.x / simulatorView.metalView.bounds.width) * CGFloat(gridWidth))
+        let endGridY = Int((endPoint.y / simulatorView.metalView.bounds.height) * CGFloat(gridHeight))
         
         // 시뮬레이터에서 두 지점 사이에 입자 생성
         simulator.createParticlesBetween(startX: startGridX, startY: startGridY, endX: endGridX, endY: endGridY)
@@ -180,8 +154,9 @@ class MetalViewController: UIViewController, MTKViewDelegate {
             bytesPerRow: gridWidth * MemoryLayout<Color>.stride
         )
     }
-    
-    // MARK: - MTKViewDelegate
+}
+// MARK: - MTKViewDelegate
+extension MetalViewController: MTKViewDelegate {
     
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         // 필요한 경우 뷰 크기 조정 처리
@@ -218,5 +193,45 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         renderEncoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+}
+
+// MARK: - ParticleSimulatorViewDelegate
+extension MetalViewController: ParticleSimulatorViewDelegate {
+    func didTapResetButton() {
+        // 시뮬레이션 초기화
+        simulator.reset()
+    }
+    
+    func handlePanGesture(_ gestureRecognizer: UIPanGestureRecognizer) {
+        switch gestureRecognizer.state {
+        case .began:
+            touchActive = true
+            lastTouchPosition = gestureRecognizer.location(in: simulatorView.metalView)
+            createParticlesAtPosition(position: lastTouchPosition!)
+            
+        case .changed:
+            let currentPosition = gestureRecognizer.location(in: simulatorView.metalView)
+            createParticlesAtPosition(position: currentPosition)
+            
+            // 빠른 움직임 중에도 부드러운 선을 위해 마지막 위치와 현재 위치 사이를 보간
+            if let lastPosition = lastTouchPosition {
+                interpolateParticles(from: lastPosition, to: currentPosition)
+            }
+            
+            lastTouchPosition = currentPosition
+            
+        case .ended, .cancelled:
+            touchActive = false
+            lastTouchPosition = nil
+            
+        default:
+            break
+        }
+    }
+    
+    func handleTapGesture(_ gestureRecognizer: UITapGestureRecognizer) {
+        let tapPosition = gestureRecognizer.location(in: simulatorView.metalView)
+        createParticlesAtPosition(position: tapPosition)
     }
 }
