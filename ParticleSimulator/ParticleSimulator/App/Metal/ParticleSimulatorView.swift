@@ -13,6 +13,7 @@ protocol ParticleSimulatorViewDelegate: AnyObject {
     func didTapResetButton()
     func handlePanGesture(_ gestureRecognizer: UIPanGestureRecognizer)
     func handleTapGesture(_ gestureRecognizer: UITapGestureRecognizer)
+    func didSelectMaterial(_ material: MaterialType)
 }
 
 class ParticleSimulatorView: UIView {
@@ -23,7 +24,10 @@ class ParticleSimulatorView: UIView {
     // Reset Button
     private var resetButton: UIButton!
     
-    // Delegate for reset action
+    // Material Selector View
+    private var materialSelectorView: MaterialSelectorView!
+    
+    // Delegate for interactions
     weak var delegate: ParticleSimulatorViewDelegate?
     
     override init(frame: CGRect) {
@@ -49,8 +53,9 @@ class ParticleSimulatorView: UIView {
             addSubview(metalView)
         }
         
-        // Setup Reset Button
+        // Setup UI Controls
         setupResetButton()
+        setupMaterialSelector()
     }
     
     private func setupResetButton() {
@@ -80,6 +85,24 @@ class ParticleSimulatorView: UIView {
         resetButton.addTarget(self, action: #selector(resetButtonTapped), for: .touchUpInside)
     }
     
+    private func setupMaterialSelector() {
+        // Create material selector view
+        materialSelectorView = MaterialSelectorView()
+        materialSelectorView.translatesAutoresizingMaskIntoConstraints = false
+        materialSelectorView.delegate = self
+        
+        // Add to view hierarchy
+        addSubview(materialSelectorView)
+        
+        // Configure constraints
+        NSLayoutConstraint.activate([
+            materialSelectorView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            materialSelectorView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            materialSelectorView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            materialSelectorView.heightAnchor.constraint(equalToConstant: 100)
+        ])
+    }
+    
     @objc private func resetButtonTapped() {
         delegate?.didTapResetButton()
     }
@@ -100,5 +123,12 @@ class ParticleSimulatorView: UIView {
     
     @objc private func handleTapGesture(_ gestureRecognizer: UITapGestureRecognizer) {
         delegate?.handleTapGesture(gestureRecognizer)
+    }
+}
+
+// MARK: - MaterialSelectorDelegate
+extension ParticleSimulatorView: MaterialSelectorDelegate {
+    func didSelectMaterial(_ material: MaterialType) {
+        delegate?.didSelectMaterial(material)
     }
 }

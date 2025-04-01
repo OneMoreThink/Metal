@@ -18,8 +18,8 @@ class MetalViewController: UIViewController {
     private var texture: MTLTexture!
     
     // 시뮬레이션 매개변수
-    private let gridWidth = 100
-    private let gridHeight = 100
+    private let gridWidth = 200  // 해상도 높임
+    private let gridHeight = 300
     
     // 시뮬레이션 객체
     private var simulator: ParticleSimulator!
@@ -30,6 +30,9 @@ class MetalViewController: UIViewController {
     
     // 분리된 메인 뷰
     private var simulatorView: ParticleSimulatorView!
+    
+    // 현재 선택된 재료
+    private var currentMaterial: MaterialType = .sand
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -44,6 +47,10 @@ class MetalViewController: UIViewController {
         
         // 터치 입력을 위한 제스처 인식기 추가
         simulatorView.setupGestureRecognizers()
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
     }
     
 // MARK: - 시뮬레이터 초기 설정 메서드
@@ -89,6 +96,7 @@ class MetalViewController: UIViewController {
         
         setupRenderPipeline()
     }
+    
     // 렌더 파이프라인 설정
     private func setupRenderPipeline() {
         // 셰이더 라이브러리 생성
@@ -111,6 +119,7 @@ class MetalViewController: UIViewController {
             print("Failed to create pipeline state: \(error)")
         }
     }
+    
     // 시뮬레이터(물리 동작 계산) 설정
     private func setupSimulator() {
         // 입자 시뮬레이터 초기화
@@ -233,5 +242,11 @@ extension MetalViewController: ParticleSimulatorViewDelegate {
     func handleTapGesture(_ gestureRecognizer: UITapGestureRecognizer) {
         let tapPosition = gestureRecognizer.location(in: simulatorView.metalView)
         createParticlesAtPosition(position: tapPosition)
+    }
+    
+    func didSelectMaterial(_ material: MaterialType) {
+        // 선택된 재료 업데이트
+        currentMaterial = material
+        simulator.setCurrentMaterial(material)
     }
 }
