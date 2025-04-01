@@ -21,7 +21,10 @@ class MetalViewController: UIViewController, MTKViewDelegate {
     // 시뮬레이션 매개변수
     private let gridWidth = 100
     private let gridHeight = 100
-    private var frameCount = 0
+    
+    // 터치 입력 관련 변수
+    private var lastTouchPosition: CGPoint?
+    private var touchActive: Bool = false
     
     // 버퍼
     private var particles = [Particle]()
@@ -31,6 +34,17 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         super.viewDidLoad()
         setupMetal()
         setupBuffers()
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // 터치 입력을 위한 제스처 인식기 추가
+        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
+        metalView.addGestureRecognizer(panGesture)
+        
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapGesture(_:)))
+        metalView.addGestureRecognizer(tapGesture)
     }
     
     private func setupMetal() {
@@ -106,23 +120,93 @@ class MetalViewController: UIViewController, MTKViewDelegate {
         colorBuffer = [Color](repeating: Color(r: 0, g: 0, b: 0, a: 0), count: gridWidth * gridHeight)
     }
     
-    // 정중앙에 입자 생성
-    private func createParticlesAtCenter() {
-        let centerX = gridWidth / 2
-        let centerY = gridHeight / 4  // 화면 상단 부분에 생성
-        
-        // 중앙에 하나의 입자만 생성
-        let index = centerY * gridWidth + centerX
-        
-        // 이미 입자가 있는지 확인
-        if particles[index].isEmpty {
-            // 입자 생성
-            particles[index] = Particle(isEmpty: false, hasBeenUpdated: false)
+    // 연속적인 터치 이동 처리
+    @objc private func handlePanGesture(_ gestureRecognizer: UIPanGestureRecognizer) {
+        switch gestureRecognizer.state {
+        case .began:
+            touchActive = true
+            lastTouchPosition = gestureRecognizer.location(in: metalView)
+            createParticlesAtPosition(position: lastTouchPosition!)
+        case .changed:
+            let currentPosition = gestureRecognizer.location(in: metalView)
+            createParticlesAtPosition(position: currentPosition)
             
-            // 모래 색상 설정
-            colorBuffer[index] = Color(r: 220, g: 180, b: 80, a: 255)
+            // 빠른 움직임 중에도 부드러운 선을 위해 마지막 위치와 현재 위치 사이를 보간
+            if let lastPosition = lastTouchPosition {
+                interpolateParticles(from: lastPosition, to: currentPosition)
+            }
+            
+            lastTouchPosition = currentPosition
+        case .ended, .cancelled:
+            touchActive = false
+            lastTouchPosition = nil
+        default:
+            break
         }
     }
+    
+    // [추가] 단일 탭 처리
+    @objc private func handleTapGesture(_ gestureRecognizer: UITapGestureRecognizer) {
+        let tapPosition = gestureRecognizer.location(in: metalView)
+        createParticlesAtPosition(position: tapPosition)
+    }
+    
+    // [추가] 터치 위치에 입자 생성
+    private func createParticlesAtPosition(position: CGPoint) {
+        // 뷰 좌표를 그리드 좌표로 변환
+        let gridX = Int((position.x / metalView.bounds.width) * CGFloat(gridWidth))
+        let gridY = Int((position.y / metalView.bounds.height) * CGFloat(gridHeight))
+        
+        // 경계 내에 있는지 확인
+        guard gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight else {
+            return
+        }
+        
+        // 더 자연스러운 느낌을 위해 터치 포인트 주변의 작은 반경에 입자 생성
+        let radius = 2
+        for offsetY in -radius...radius {
+            for offsetX in -radius...radius {
+                let x = gridX + offsetX
+                let y = gridY + offsetY
+                
+                // 경계 확인
+                if x >= 0 && x < gridWidth && y >= 0 && y < gridHeight {
+                    let index = y * gridWidth + x
+                    
+                    // 빈 셀에만 모래 배치
+                    if particles[index].isEmpty {
+                        // 입자 생성
+                        particles[index] = Particle(isEmpty: false, hasBeenUpdated: false)
+                        
+                        // 모래 색상 설정 (자연스러운 모습을 위한 약간의 변화)
+                        let variation = UInt8.random(in: 0...30)
+                        colorBuffer[index] = Color(
+                            r: UInt8(min(220 + Int(variation) - 15, 255)),
+                            g: UInt8(min(180 + Int(variation) - 15, 255)),
+                            b: UInt8(min(80 + Int(variation) - 15, 255)),
+                            a: 255
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
+    // [추가] 빠르게 드래그할 때 연속적인 입자 스트림을 만들기 위한 도우미 메소드
+    private func interpolateParticles(from startPoint: CGPoint, to endPoint: CGPoint) {
+        let distance = hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y)
+        let steps = max(Int(distance / 2.0), 1) // 약 2픽셀마다 하나의 입자
+        
+        for step in 0..<steps {
+            let progress = CGFloat(step) / CGFloat(steps)
+            let interpolatedPoint = CGPoint(
+                x: startPoint.x + (endPoint.x - startPoint.x) * progress,
+                y: startPoint.y + (endPoint.y - startPoint.y) * progress
+            )
+            createParticlesAtPosition(position: interpolatedPoint)
+        }
+    }
+
     
     // 모래 입자 업데이트 (물리 시뮬레이션)
     private func updateSandSimulation() {
@@ -199,14 +283,7 @@ class MetalViewController: UIViewController, MTKViewDelegate {
     }
     
     func draw(in view: MTKView) {
-        // 프레임 카운터 증가
-        frameCount += 1
-        
-        // 20프레임마다 새 입자 생성
-        if frameCount % 20 == 0 {
-            createParticlesAtCenter()
-        }
-        
+
         // 시뮬레이션 업데이트
         updateSandSimulation()
         
